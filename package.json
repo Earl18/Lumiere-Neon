@@ -6,7 +6,8 @@
     "dev": "node scripts/start.js",
     "dev:backend": "npm --prefix backend run dev",
     "dev:frontend": "npm --prefix frontend run dev",
-    "build": "npm --prefix frontend run build"
+    "build": "npm --prefix frontend run build",
+    "migrate:mongodb": "node scripts/migrate-mongodb.js"
   },
   "dependencies": {
     "@xmldom/xmldom": "^0.9.10",

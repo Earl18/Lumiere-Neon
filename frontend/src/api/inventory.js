@@ -96,6 +96,31 @@ export const updateOrderStatus = async (id, status) => {
     return parseJsonResponse(res);
 };
 
+export const downloadOrderPackingList = async (id) => {
+    const res = await fetch(`${BASE_URL}/orders/${id}/packing-list`, {
+        headers: getAuthHeader(),
+    });
+
+    if (!res.ok) {
+        let errorMessage = 'Packing list download failed.';
+        try {
+            const data = await res.json();
+            errorMessage = data.message || errorMessage;
+        } catch (error) {
+            // Ignore JSON parsing errors for binary responses.
+        }
+        throw new Error(errorMessage);
+    }
+
+    const contentDisposition = res.headers.get('Content-Disposition') || '';
+    const fileNameMatch = /filename="?([^"]+)"?/i.exec(contentDisposition);
+
+    return {
+        blob: await res.blob(),
+        fileName: fileNameMatch?.[1] || 'packing-list.docx',
+    };
+};
+
 export const updateOrderAccounting = async (id, action, options = {}) => {
     const res = await fetch(`${BASE_URL}/orders/${id}/accounting`, {
         method: 'PUT',
@@ -135,6 +160,31 @@ export const signTransferOrder = async (orderId, payload) => {
         body: JSON.stringify(payload),
     });
     return parseJsonResponse(res);
+};
+
+export const downloadTransferPackingList = async (orderId) => {
+    const res = await fetch(`${BASE_URL}/transfer-orders/order/${orderId}/packing-list`, {
+        headers: getAuthHeader(),
+    });
+
+    if (!res.ok) {
+        let errorMessage = 'Transfer packing list download failed.';
+        try {
+            const data = await res.json();
+            errorMessage = data.message || errorMessage;
+        } catch (error) {
+            // Ignore JSON parsing errors for binary responses.
+        }
+        throw new Error(errorMessage);
+    }
+
+    const contentDisposition = res.headers.get('Content-Disposition') || '';
+    const fileNameMatch = /filename="?([^"]+)"?/i.exec(contentDisposition);
+
+    return {
+        blob: await res.blob(),
+        fileName: fileNameMatch?.[1] || 'transfer-packing-list.docx',
+    };
 };
 
 export const fetchSupplierPurchaseOrder = async (token) => {

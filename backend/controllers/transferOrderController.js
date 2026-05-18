@@ -6,6 +6,9 @@ const {
     writeBase64Signature,
     attachTransferOrdersToOrders,
 } = require('../utils/transferOrderService');
+const {
+    renderTransferPackingListDocument,
+} = require('../utils/packingListService');
 const { getPublicPath } = require('../utils/purchaseOrderService');
 
 const getManagerWarehouseNames = async (user) => {
@@ -158,7 +161,37 @@ const signTransferOrder = async (req, res) => {
     }
 };
 
+const downloadTransferPackingList = async (req, res) => {
+    try {
+        const order = await Order.findById(req.params.orderId).populate('product');
+        if (!order || order.orderType !== 'Transfer') {
+            return res.status(404).json({ message: 'Stock transfer document not found.' });
+        }
+
+        if (!req.user || req.user.role !== 'Manager') {
+            return res.status(403).json({ message: 'Only warehouse managers can access this transfer packing list.' });
+        }
+
+        const transferOrder = await TransferOrder.findOne({ order: order._id });
+        if (!transferOrder || transferOrder.status !== 'Transfer Signed') {
+            return res.status(400).json({ message: 'Transfer packing list is only available after both warehouse managers sign.' });
+        }
+
+        const warehouseNames = await getManagerWarehouseNames(req.user);
+        const isSourceWarehouseManager = warehouseNames?.includes(order.sourceWarehouse);
+        if (!isSourceWarehouseManager) {
+            return res.status(403).json({ message: 'Only the source warehouse manager can access this transfer packing list.' });
+        }
+
+        const { outputPath, fileName } = await renderTransferPackingListDocument(order._id);
+        return res.download(outputPath, fileName);
+    } catch (error) {
+        return res.status(500).json({ message: error.message });
+    }
+};
+
 module.exports = {
     getTransferOrderByOrderId,
     signTransferOrder,
+    downloadTransferPackingList,
 };

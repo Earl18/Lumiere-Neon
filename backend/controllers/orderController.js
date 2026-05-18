@@ -15,6 +15,9 @@ const {
     createTransferOrderForOrder,
 } = require('../utils/transferOrderService');
 const {
+    renderPackingListDocument,
+} = require('../utils/packingListService');
+const {
     createSupplierDisbursement,
     getPayoutById,
     createSupplierDisbursementCheckout,
@@ -657,8 +660,8 @@ const updateOrderAccounting = async (req, res) => {
                 }
             }
         } else if (order.orderType === 'Outbound') {
-            if (!['Pending', 'Shipped', 'Delivered'].includes(order.status)) {
-                return res.status(400).json({ message: 'Only active customer sales can be recorded as accounts receivable.' });
+            if (order.status !== 'Delivered') {
+                return res.status(400).json({ message: 'Only completed customer sales can be collected.' });
             }
 
             if (action !== 'COLLECT') {
@@ -848,4 +851,26 @@ const getOrders = async (req, res) => {
     }
 };
 
-module.exports = { createOrder, updateOrderStatus, updateOrderAccounting, getOrders };
+const downloadPackingList = async (req, res) => {
+    try {
+        const order = await Order.findById(req.params.id);
+        if (!order) {
+            return res.status(404).json({ message: 'Order not found' });
+        }
+
+        if (order.orderType !== 'Outbound') {
+            return res.status(400).json({ message: 'Packing lists are only available for customer sales.' });
+        }
+
+        if (!(await canManageOrder(req.user, order))) {
+            return res.status(403).json({ message: 'Access Denied: You can only access packing lists for your assigned warehouse.' });
+        }
+
+        const { outputPath, fileName } = await renderPackingListDocument(order._id);
+        return res.download(outputPath, fileName);
+    } catch (error) {
+        return res.status(500).json({ message: error.message });
+    }
+};
+
+module.exports = { createOrder, updateOrderStatus, updateOrderAccounting, getOrders, downloadPackingList };

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { fetchProducts, fetchOrders, fetchSuppliers, createOrder, createProduct, importProducts, downloadProductImportTemplate, updateOrderStatus, updateOrderAccounting, createSupplier, updateSupplier, updateProduct, deleteProduct, deleteSupplier, fetchWarehouses, createWarehouse, updateWarehouse, deleteWarehouse, fetchPurchaseOrderForOrder, signPurchaseOrder, fetchTransferOrderForOrder, signTransferOrder, createOrUpdateSupplierAccount, fetchOwnSupplierProfile, updateOwnSupplierPaymentMethods } from './api/inventory';
+import { fetchProducts, fetchOrders, fetchSuppliers, createOrder, createProduct, importProducts, downloadProductImportTemplate, updateOrderStatus, downloadOrderPackingList, updateOrderAccounting, createSupplier, updateSupplier, updateProduct, deleteProduct, deleteSupplier, fetchWarehouses, createWarehouse, updateWarehouse, deleteWarehouse, fetchPurchaseOrderForOrder, signPurchaseOrder, fetchTransferOrderForOrder, signTransferOrder, downloadTransferPackingList, createOrUpdateSupplierAccount, fetchOwnSupplierProfile, updateOwnSupplierPaymentMethods } from './api/inventory';
 import Login from './components/Login';
 import SignaturePadField from './components/SignaturePadField';
 import SupplierSignPage from './components/SupplierSignPage';
@@ -433,6 +433,7 @@ function App() {
   const [supplierPaymentMethodPendingDeleteIndex, setSupplierPaymentMethodPendingDeleteIndex] = useState(null);
   const [accountingActionTarget, setAccountingActionTarget] = useState(null);
   const [selectedAccountingPaymentMethod, setSelectedAccountingPaymentMethod] = useState('');
+  const [selectedOutboundOrder, setSelectedOutboundOrder] = useState(null);
   const canManageOrders = ['Manager', 'SuperAdmin'].includes(user?.role);
   const canManageProducts = ['Manager', 'SuperAdmin'].includes(user?.role);
   const canViewExpenses = ['SuperAdmin', 'Accountant'].includes(user?.role);
@@ -1050,6 +1051,48 @@ function App() {
     } catch (error) {
       triggerError(error.message);
     }
+  };
+
+  const handleDownloadPackingList = async (id) => {
+    try {
+      const { blob, fileName } = await downloadOrderPackingList(id);
+      const blobUrl = window.URL.createObjectURL(blob);
+      const downloadLink = document.createElement('a');
+      downloadLink.href = blobUrl;
+      downloadLink.download = fileName;
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      document.body.removeChild(downloadLink);
+      window.URL.revokeObjectURL(blobUrl);
+      triggerSuccess('Packing list downloaded.');
+    } catch (error) {
+      triggerError(error.message);
+    }
+  };
+
+  const handleDownloadTransferPackingList = async (orderId) => {
+    try {
+      const { blob, fileName } = await downloadTransferPackingList(orderId);
+      const blobUrl = window.URL.createObjectURL(blob);
+      const downloadLink = document.createElement('a');
+      downloadLink.href = blobUrl;
+      downloadLink.download = fileName;
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      document.body.removeChild(downloadLink);
+      window.URL.revokeObjectURL(blobUrl);
+      triggerSuccess('Transfer packing list downloaded.');
+    } catch (error) {
+      triggerError(error.message);
+    }
+  };
+
+  const openOutboundOrderModal = (order) => {
+    setSelectedOutboundOrder(order);
+  };
+
+  const closeOutboundOrderModal = () => {
+    setSelectedOutboundOrder(null);
   };
 
   const handleAccountingAction = async (orderId, action, options = {}) => {
@@ -1871,7 +1914,7 @@ function App() {
     ? orders.filter((order) => String(order.supplier?._id || order.supplier || '') === currentSupplierId)
     : orders.filter((order) => {
         const actorRole = order.createdBy?.role || order.createdByRole;
-        return actorRole === 'Manager';
+        return ['Manager', 'SuperAdmin'].includes(actorRole);
       });
   const rolePriority = { SuperAdmin: 0, Manager: 1, Accountant: 2, Supplier: 3, Staff: 4 };
   const sortedUsers = [...users].sort((a, b) => {
@@ -1914,12 +1957,14 @@ function App() {
     .map((order) => {
       const customerUnitPrice = getOrderCustomerUnitPrice(order);
       const receivableAmount = getOrderReceivableAmount(order);
+      const canCollect = order.status === 'Delivered';
       return {
         ...order,
         customerUnitPrice,
         receivableAmount,
         accountingTerm: order.accountingSettlementStatus === 'Settled' ? 'Collections' : 'Accounts Receivable',
-        accountingAction: order.accountingSettlementStatus === 'Settled' ? '' : 'COLLECT',
+        accountingAction: order.accountingSettlementStatus === 'Settled' ? '' : (canCollect ? 'COLLECT' : ''),
+        canCollect,
       };
     });
   const visibleAccountingOrders = [...supplierAccountingOrders, ...customerAccountingOrders]
@@ -1945,17 +1990,6 @@ function App() {
   const visibleExpenseLedgerOrders = expenseViewMode === 'history'
     ? historicalExpenseLedgerOrders
     : currentExpenseLedgerOrders;
-  const disbursementHistoryEntries = supplierAccountingOrders
-    .flatMap((order) => (
-      Array.isArray(order.disbursementHistory)
-        ? order.disbursementHistory.map((entry, entryIndex) => ({
-            ...entry,
-            key: `${order._id}-${entryIndex}-${entry.createdAt || ''}`,
-            order,
-          }))
-        : []
-    ))
-    .sort((leftEntry, rightEntry) => new Date(rightEntry.createdAt) - new Date(leftEntry.createdAt));
   const getOrderActor = (order) => {
     const name = order.createdBy?.name || order.createdByName || 'Lumiere Manager';
     const rawRole = order.createdBy?.role || order.createdByRole;
@@ -2089,6 +2123,12 @@ function App() {
     : null;
   const hasTransferDraftCopy = Boolean(transferOrderRecord?.documentUrl);
   const hasTransferFinalCopy = Boolean(transferOrderRecord?.finalDocumentUrl);
+  const isSourceWarehouseTransferViewer = Boolean(
+    transferOrderRecord?.order?.sourceWarehouse && assignedWarehouseNames.includes(transferOrderRecord.order.sourceWarehouse)
+  );
+  const shouldShowTransferPackingListOnly = Boolean(
+    transferOrderRecord?.status === 'Transfer Signed' && isSourceWarehouseTransferViewer
+  );
   const transferLogColumnLabel = isWarehouseAManager || user?.role === 'SuperAdmin' ? 'Requested' : 'Source';
   const getLogActionLabel = (order) => {
     if (order.status === 'Delivered') return order.orderType === 'Inbound' ? 'Order Received' : 'Completed';
@@ -2908,7 +2948,8 @@ function App() {
                       const actor = getOrderActor(o);
                       const isPurchaseOrderOpenable = canOpenPurchaseOrder(o);
                       const isTransferOrderOpenable = canOpenTransferOrder(o);
-                      const isOrderDocumentOpenable = isPurchaseOrderOpenable || isTransferOrderOpenable;
+                      const isOutboundOrderOpenable = o.orderType === 'Outbound' && o.status !== 'Delivered';
+                      const isOrderDocumentOpenable = isPurchaseOrderOpenable || isTransferOrderOpenable || isOutboundOrderOpenable;
                       return (
                       <tr
                         key={o._id}
@@ -2917,6 +2958,8 @@ function App() {
                             openPurchaseOrderModal(o);
                           } else if (isTransferOrderOpenable) {
                             openTransferOrderModal(o);
+                          } else if (isOutboundOrderOpenable) {
+                            openOutboundOrderModal(o);
                           }
                         }}
                         className={`border-b border-white/5 transition ${isOrderDocumentOpenable ? 'cursor-pointer hover:bg-white/5' : 'hover:bg-white/5'}`}
@@ -3400,33 +3443,39 @@ function App() {
                           </td>
                           <td className="p-4 text-right">
                             {order.accountingSettlementStatus !== 'Settled' ? (
-                              <button
-                                disabled={orderNeedsSupplierQuoteForDisbursement(order)}
-                                onClick={() => {
-                                  if (order.accountingAction === 'REFRESH_DISBURSEMENT') {
-                                    handleAccountingAction(order._id, order.accountingAction);
-                                  } else {
-                                    openAccountingActionModal(order, order.accountingAction);
-                                  }
-                                }}
-                                className={`rounded-full border px-3 py-1 text-[12px] uppercase font-bold transition ${
-                                  orderNeedsSupplierQuoteForDisbursement(order)
-                                    ? 'cursor-not-allowed border-[#5A595E] bg-white/5 text-gray-500'
-                                    : 'border-[#F2C4CE]/40 bg-[#F2C4CE]/10 text-[#F2C4CE] hover:bg-[#F2C4CE]/20 hover:text-white'
-                                }`}
-                              >
-                                {orderNeedsSupplierQuoteForDisbursement(order)
-                                  ? 'Missing Quote'
-                                  : order.accountingAction === 'DISBURSE'
-                                  ? 'Disbursement'
-                                  : order.accountingAction === 'RETRY_DISBURSEMENT'
-                                    ? 'Retry Disbursement'
-                                    : order.accountingAction === 'RELEASE_ESCROW'
-                                      ? 'Release Payment'
-                                    : order.accountingAction === 'REFRESH_DISBURSEMENT'
-                                      ? 'Disbursement'
-                                      : 'Collect'}
-                              </button>
+                              expenseSubTab === 'receivables' && !order.canCollect ? (
+                                <span className="inline-flex rounded-full border border-[#5A595E] bg-white/5 px-3 py-1 text-[12px] font-bold uppercase tracking-[0.12em] text-gray-500">
+                                  Complete Sale First
+                                </span>
+                              ) : (
+                                <button
+                                  disabled={orderNeedsSupplierQuoteForDisbursement(order)}
+                                  onClick={() => {
+                                    if (order.accountingAction === 'REFRESH_DISBURSEMENT') {
+                                      handleAccountingAction(order._id, order.accountingAction);
+                                    } else {
+                                      openAccountingActionModal(order, order.accountingAction);
+                                    }
+                                  }}
+                                  className={`rounded-full border px-3 py-1 text-[12px] uppercase font-bold transition ${
+                                    orderNeedsSupplierQuoteForDisbursement(order)
+                                      ? 'cursor-not-allowed border-[#5A595E] bg-white/5 text-gray-500'
+                                      : 'border-[#F2C4CE]/40 bg-[#F2C4CE]/10 text-[#F2C4CE] hover:bg-[#F2C4CE]/20 hover:text-white'
+                                  }`}
+                                >
+                                  {orderNeedsSupplierQuoteForDisbursement(order)
+                                    ? 'Missing Quote'
+                                    : order.accountingAction === 'DISBURSE'
+                                    ? 'Disbursement'
+                                    : order.accountingAction === 'RETRY_DISBURSEMENT'
+                                      ? 'Retry Disbursement'
+                                      : order.accountingAction === 'RELEASE_ESCROW'
+                                        ? 'Release Payment'
+                                      : order.accountingAction === 'REFRESH_DISBURSEMENT'
+                                        ? 'Disbursement'
+                                        : 'Collect'}
+                                </button>
+                              )
                             ) : (
                               <span className="text-[12px] font-bold uppercase tracking-[0.12em] text-gray-500">
                                 {order.accountingSettledByName ? `By ${order.accountingSettledByName}` : 'Recorded'}
@@ -3445,7 +3494,7 @@ function App() {
                 </div>
               </div>
 
-              {expenseSubTab === 'payables' && expenseViewMode === 'history' && (
+              {false && expenseSubTab === 'payables' && expenseViewMode === 'history' && (
                 <div className="rounded-2xl border border-[#5A595E] bg-[#36353A]/40 shadow-2xl overflow-hidden">
                   <div className="border-b border-[#5A595E] bg-[#232226] px-5 py-4">
                     <div className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#F2C4CE]">Disbursement History</div>
@@ -3542,6 +3591,64 @@ function App() {
           )}
         </div>
       </main>
+
+      {selectedOutboundOrder && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/85 p-6 backdrop-blur-sm" onClick={closeOutboundOrderModal}>
+          <div className="w-full max-w-2xl rounded-[28px] border border-[#5A595E] bg-[#36353A] p-6 shadow-[0_30px_80px_rgba(0,0,0,0.4)] md:p-8" onClick={(event) => event.stopPropagation()}>
+            <div className="flex flex-col gap-3 border-b border-white/10 pb-5 md:flex-row md:items-start md:justify-between">
+              <div>
+                <div className="text-[12px] uppercase tracking-[0.18em] text-[#F2C4CE]">Customer Sale Details</div>
+                <h3 className="mt-2 text-2xl font-bold text-white">{selectedOutboundOrder.product?.name || 'Customer Sale'}</h3>
+                <p className="mt-2 text-[14px] text-gray-400">
+                  {selectedOutboundOrder.quantity} {selectedOutboundOrder.product?.unitOfMeasure || 'unit'} from {selectedOutboundOrder.warehouse}
+                </p>
+              </div>
+              <button onClick={closeOutboundOrderModal} className="rounded-full border border-[#5A595E] px-4 py-2 text-[12px] font-bold uppercase tracking-[0.14em] text-gray-300 transition hover:bg-white/5">
+                Close
+              </button>
+            </div>
+
+            <div className="mt-6 grid gap-4 md:grid-cols-2">
+              <div className="rounded-2xl border border-white/8 bg-black/10 p-4">
+                <div className="text-[12px] uppercase tracking-[0.12em] text-gray-500">Requested By</div>
+                <div className="mt-2 text-lg font-bold text-white">{getOrderActor(selectedOutboundOrder).name}</div>
+                <div className="mt-1 text-[12px] uppercase tracking-[0.12em] text-[#F2C4CE]">{getOrderActor(selectedOutboundOrder).role}</div>
+              </div>
+              <div className="rounded-2xl border border-white/8 bg-black/10 p-4">
+                <div className="text-[12px] uppercase tracking-[0.12em] text-gray-500">Status</div>
+                <div className="mt-2 text-lg font-bold text-white">{getStatusLabel(selectedOutboundOrder)}</div>
+                <div className="mt-1 text-[12px] text-gray-400">{new Date(selectedOutboundOrder.createdAt).toLocaleString()}</div>
+              </div>
+              <div className="rounded-2xl border border-white/8 bg-black/10 p-4">
+                <div className="text-[12px] uppercase tracking-[0.12em] text-gray-500">Selling Price</div>
+                <div className="mt-2 text-lg font-bold text-[#F7C0B4]">{formatCurrency(getOrderCustomerUnitPrice(selectedOutboundOrder))}</div>
+                <div className="mt-1 text-[12px] text-gray-400">Per {selectedOutboundOrder.product?.unitOfMeasure || 'unit'}</div>
+              </div>
+              <div className="rounded-2xl border border-white/8 bg-black/10 p-4">
+                <div className="text-[12px] uppercase tracking-[0.12em] text-gray-500">Receivable Amount</div>
+                <div className="mt-2 text-lg font-bold text-[#78DC8C]">{formatCurrency(getOrderReceivableAmount(selectedOutboundOrder))}</div>
+                <div className="mt-1 text-[12px] text-gray-400">Customer sale record</div>
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-white/8 bg-black/10 p-5">
+              <div className="text-[12px] uppercase tracking-[0.12em] text-gray-500">Packing List</div>
+              <p className="mt-2 text-[14px] leading-7 text-gray-300">
+                Download or re-download the current packing list for this customer sale at any time.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => handleDownloadPackingList(selectedOutboundOrder._id)}
+                  className="rounded-lg border border-[#F2C4CE]/40 bg-[#F2C4CE]/10 px-5 py-3 text-[13px] font-bold uppercase tracking-[0.12em] text-[#F2C4CE] transition hover:bg-[#F2C4CE]/20 hover:text-white"
+                >
+                  Download Packing List
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showPurchaseOrderModal && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/85 p-6 backdrop-blur-sm">
@@ -3721,7 +3828,7 @@ function App() {
                   </div>
 
                   <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-                    {hasTransferDraftCopy && (
+                    {hasTransferDraftCopy && transferOrderRecord.status !== 'Transfer Signed' && (
                       <a
                         href={getDocumentUrl(transferOrderRecord.documentUrl)}
                         target="_blank"
@@ -3741,6 +3848,16 @@ function App() {
                       >
                         Open Final Signed Copy
                       </a>
+                    )}
+
+                    {shouldShowTransferPackingListOnly && (
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadTransferPackingList(transferOrderRecord.order._id)}
+                        className="inline-flex items-center justify-center rounded-xl border border-green-400/30 bg-green-400/10 px-4 py-3 text-[13px] font-bold uppercase tracking-[0.12em] text-green-200 transition hover:bg-green-400/20"
+                      >
+                        Download Packing List
+                      </button>
                     )}
                   </div>
                 </div>
