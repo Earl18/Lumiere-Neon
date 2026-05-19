@@ -191,6 +191,23 @@ const writeBase64Signature = async (signatureDataUrl, signerLabel) => {
     return { filePath, storageUrl };
 };
 
+const readSignatureBuffer = async (imagePath, storageUrl) => {
+    if (imagePath && await fileExists(imagePath)) {
+        return fs.readFile(imagePath);
+    }
+
+    if (storageUrl) {
+        const response = await fetch(storageUrl);
+        if (!response.ok) {
+            throw new Error(`Failed to download signature asset from storage: ${response.status}`);
+        }
+
+        return Buffer.from(await response.arrayBuffer());
+    }
+
+    return null;
+};
+
 const generateNextPoNumber = async () => {
     const prefix = `PO-${new Date().getFullYear()}`;
     const existingCount = await PurchaseOrder.countDocuments({
@@ -276,8 +293,11 @@ const buildDocumentPayload = async (purchaseOrder) => {
         warehouse_name: warehouse?.name || order.warehouse || WAREHOUSE_A_NAME,
         warehouse_address: warehouse?.address || '',
         warehouse_manager_signature_path: purchaseOrder.warehouseManagerSignature?.imagePath || '',
+        warehouse_manager_signature_storage_url: purchaseOrder.warehouseManagerSignature?.storageUrl || '',
         owner_signature_path: purchaseOrder.ownerSignature?.imagePath || '',
+        owner_signature_storage_url: purchaseOrder.ownerSignature?.storageUrl || '',
         supplier_signature_path: purchaseOrder.supplierSignature?.imagePath || '',
+        supplier_signature_storage_url: purchaseOrder.supplierSignature?.storageUrl || '',
         warehouse_manager_name: purchaseOrder.warehouseManagerSignature?.signerName || order.createdByName || 'Warehouse Manager',
         owner_name: purchaseOrder.ownerSignature?.signerName || ownerAccount?.name || COMPANY.ownerName,
         supplier_representative: purchaseOrder.supplierRepresentativeName || supplier?.contactPerson || supplier?.name || 'Supplier Representative',
@@ -632,20 +652,36 @@ const renderPurchaseOrderDocument = async (purchaseOrder, outputType = 'company'
     setParagraphText(deliveryAddressParagraph, `Delivery Address: ${payload.warehouse_name}${payload.warehouse_address ? `, ${payload.warehouse_address}` : ''}`);
 
     const imageRefs = [];
-    if (payload.warehouse_manager_signature_path) {
-        imageRefs.push({ key: 'warehouse', ref: addImageRelationship(zip, relsDom, payload.warehouse_manager_signature_path, `${purchaseOrder.poNumber}-warehouse`) });
+    if (payload.warehouse_manager_signature_path || payload.warehouse_manager_signature_storage_url) {
+        imageRefs.push({
+            key: 'warehouse',
+            imagePath: payload.warehouse_manager_signature_path,
+            storageUrl: payload.warehouse_manager_signature_storage_url,
+            ref: addImageRelationship(zip, relsDom, payload.warehouse_manager_signature_path || payload.warehouse_manager_signature_storage_url, `${purchaseOrder.poNumber}-warehouse`),
+        });
     }
-    if (payload.supplier_signature_path) {
-        imageRefs.push({ key: 'supplier', ref: addImageRelationship(zip, relsDom, payload.supplier_signature_path, `${purchaseOrder.poNumber}-supplier`) });
+    if (payload.supplier_signature_path || payload.supplier_signature_storage_url) {
+        imageRefs.push({
+            key: 'supplier',
+            imagePath: payload.supplier_signature_path,
+            storageUrl: payload.supplier_signature_storage_url,
+            ref: addImageRelationship(zip, relsDom, payload.supplier_signature_path || payload.supplier_signature_storage_url, `${purchaseOrder.poNumber}-supplier`),
+        });
     }
-    if (payload.owner_signature_path) {
-        imageRefs.push({ key: 'owner', ref: addImageRelationship(zip, relsDom, payload.owner_signature_path, `${purchaseOrder.poNumber}-owner`) });
+    if (payload.owner_signature_path || payload.owner_signature_storage_url) {
+        imageRefs.push({
+            key: 'owner',
+            imagePath: payload.owner_signature_path,
+            storageUrl: payload.owner_signature_storage_url,
+            ref: addImageRelationship(zip, relsDom, payload.owner_signature_path || payload.owner_signature_storage_url, `${purchaseOrder.poNumber}-owner`),
+        });
     }
 
     const resolvedImageRefs = {};
     for (const imageRef of imageRefs) {
         if (!imageRef.ref) continue;
-        const imageBuffer = await imageRef.ref.imageBufferPromise;
+        const imageBuffer = await readSignatureBuffer(imageRef.imagePath, imageRef.storageUrl);
+        if (!imageBuffer) continue;
         const dimensions = parsePngDimensions(imageBuffer);
         const maxWidth = imageRef.key === 'owner' ? 118 : 92;
         const scaledWidth = Math.min(dimensions.width, maxWidth);
