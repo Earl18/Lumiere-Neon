@@ -10,7 +10,14 @@ dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 
 const app = express();
 
-app.use(cors());
+const corsOptions = {
+    origin: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+};
+
+app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use('/files', express.static(path.resolve(__dirname, 'storage')));
 app.get('/healthz', (_req, res) => {
