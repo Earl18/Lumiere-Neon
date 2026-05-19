@@ -15,6 +15,7 @@ The website is designed around real operational flows:
 Lumiere Neon combines operations, warehouse control, supply-chain visibility, and accounting support in a single dark-themed web dashboard.
 
 Core areas of the website:
+- `Role Dashboards`: separate dashboard experiences for Super Admin, Manager, Accountant, and Supplier
 - `Inventory`: product catalog, warehouse stock, category views, stock health, and pricing
 - `Order Logs`: inbound, transfer, and outbound operational records
 - `Supply Network`: supplier registration, product-to-supplier mapping, and supplier quotes
@@ -71,6 +72,13 @@ Core areas of the website:
 - Selling price and supplier pricing support
 - Warehouse seeding on backend startup
 
+### Dashboards
+- Separate Super Admin dashboard and inventory workspace
+- Separate Manager dashboard and inventory workspace
+- Supplier dashboard with operational queue, payout summary, and action list
+- Accountant dashboard with payable, receivable, disbursement, and collection summaries
+- Role-scoped activity and KPI views instead of one shared landing page
+
 ### Orders and Logs
 - Inbound, outbound, and transfer order creation
 - Role-aware order visibility
@@ -114,12 +122,14 @@ Core areas of the website:
 
 ### Super Admin
 - Full platform access
+- Dedicated executive dashboard plus separate inventory workspace
 - Can manage products, suppliers, warehouses, and personnel
 - Can approve purchase orders as the company owner / CEO
 - Can create orders and review reports
 - Can participate in accounting flows
 
 ### Manager
+- Dedicated warehouse operations dashboard plus separate inventory workspace
 - Can manage operational flows for assigned warehouses
 - Can create inbound, transfer, and outbound orders
 - Can sign warehouse documents assigned to their warehouse
@@ -135,9 +145,10 @@ Core areas of the website:
 - No privileged accounting or admin actions
 
 ### Supplier
-- Can access their own supplier view
+- Can access their own supplier dashboard and supplier product view
 - Can review and sign purchase orders
 - Can manage payout methods for disbursements
+- Can monitor recent inbound activity and supplier-side order status
 
 ## Tech Stack
 
@@ -281,6 +292,14 @@ Backend environment variable example:
 ```env
 FRONTEND_BASE_URL=https://your-vercel-url.vercel.app
 ```
+
+### Role Dashboard Notes
+
+Current dashboard routing in the frontend:
+- `SuperAdmin`: `Dashboard` and `Inventory` are separate tabs
+- `Manager`: `Dashboard` and `Inventory` are separate tabs
+- `Accountant`: `Dashboard` is the `inventory` route for accounting summary access
+- `Supplier`: `Dashboard` is the `inventory` route for supplier workspace access
 
 ## MongoDB Migration
 
