@@ -498,6 +498,20 @@ function App() {
       return;
     }
 
+    if (user.role === 'SuperAdmin') {
+      if (!['dashboard', 'inventory', 'orders', 'expenses', 'suppliers', 'reports', 'users'].includes(activeTab)) {
+        setActiveTab('dashboard');
+      }
+      return;
+    }
+
+    if (user.role === 'Manager') {
+      if (!['dashboard', 'inventory', 'orders', 'suppliers', 'reports', 'users'].includes(activeTab)) {
+        setActiveTab('dashboard');
+      }
+      return;
+    }
+
     const canViewUsers = ['Manager', 'SuperAdmin'].includes(user.role);
     const canViewSuppliers = ['Manager', 'SuperAdmin'].includes(user.role);
     const canViewReports = ['Manager', 'SuperAdmin'].includes(user.role);
@@ -2161,6 +2175,53 @@ function App() {
   const supplierPendingOrders = orders.filter((order) => order.status === 'Pending').length;
   const supplierCompletedOrders = orders.filter((order) => order.status === 'Delivered').length;
   const supplierAwaitingSignatureOrders = orders.filter((order) => order.purchaseOrder?.status === 'Awaiting Supplier Signature').length;
+  const supplierSavedPaymentMethods = supplierPaymentMethods.length || supplierProfile?.paymentMethods?.length || 0;
+  const supplierPrimaryPaymentMethod = getPrimarySupplierPaymentMethod(supplierProfile);
+  const supplierPrimaryPaymentLabel = supplierPrimaryPaymentMethod
+    ? (
+        supplierPrimaryPaymentMethod.methodName
+        || getSupplierPaymentProviderLabel(supplierPrimaryPaymentMethod.methodType, supplierPrimaryPaymentMethod.providerCode)
+        || 'Saved payout method'
+      )
+    : 'Not configured';
+  const supplierPrimaryPaymentDetail = supplierPrimaryPaymentMethod
+    ? [supplierPrimaryPaymentMethod.accountName, supplierPrimaryPaymentMethod.accountNumber].filter(Boolean).join(' • ')
+    : 'Add a payout method so Lumiere can disburse directly to your supplier account.';
+  const supplierRecentOrders = [...orders]
+    .sort((leftOrder, rightOrder) => new Date(rightOrder.createdAt) - new Date(leftOrder.createdAt))
+    .slice(0, 4);
+  const getSupplierDashboardOrderStatusLabel = (order) => getStatusLabel(order);
+  const getSupplierDashboardOrderStatusClass = (order) => {
+    const resolvedStatus = getSupplierDashboardOrderStatusLabel(order);
+    if (resolvedStatus === 'Cancelled') return 'border-red-400/30 bg-red-400/10 text-red-300';
+    if (['Order Received', 'Delivered', 'Completed'].includes(resolvedStatus)) return 'border-[#78DC8C]/30 bg-[#78DC8C]/10 text-[#92E2A1]';
+    if (resolvedStatus === 'Awaiting Supplier Signature') return 'border-[#F5A28F]/30 bg-[#F58F7C]/10 text-[#F7C0B4]';
+    return 'border-white/10 bg-white/5 text-gray-300';
+  };
+  const supplierExtraPaymentMethods = Math.max(supplierSavedPaymentMethods - 1, 0);
+  const supplierPipelineStats = [
+    { label: 'Pending', value: supplierPendingOrders, tone: 'bg-[#F2C4CE]' },
+    { label: 'Awaiting Signature', value: supplierAwaitingSignatureOrders, tone: 'bg-[#F5A28F]' },
+    { label: 'Completed', value: supplierCompletedOrders, tone: 'bg-[#78DC8C]' },
+    { label: 'Payout Methods', value: supplierSavedPaymentMethods, tone: 'bg-[#A9B5FF]' },
+  ];
+  const supplierPipelineMax = Math.max(...supplierPipelineStats.map((item) => item.value), 1);
+  const superAdminInboundPending = orders.filter((order) => order.orderType === 'Inbound' && order.status === 'Pending').length;
+  const superAdminTransferPending = orders.filter((order) => order.orderType === 'Transfer' && order.status === 'Pending').length;
+  const superAdminRecentActivity = [...orders]
+    .sort((leftOrder, rightOrder) => new Date(rightOrder.createdAt) - new Date(leftOrder.createdAt))
+    .slice(0, 5);
+  const managerScopedOrders = orders.filter((order) => canManageOrderAction(order));
+  const managerPendingInbound = managerScopedOrders.filter((order) => order.orderType === 'Inbound' && order.status === 'Pending').length;
+  const managerPendingTransfers = managerScopedOrders.filter((order) => order.orderType === 'Transfer' && order.status === 'Pending').length;
+  const managerCompletedOrders = managerScopedOrders.filter((order) => order.status === 'Delivered').length;
+  const managerRecentActivity = [...managerScopedOrders]
+    .sort((leftOrder, rightOrder) => new Date(rightOrder.createdAt) - new Date(leftOrder.createdAt))
+    .slice(0, 5);
+  const managerWarehouseLoad = assignedWarehouseNames.map((warehouseName) => ({
+    name: warehouseName,
+    stock: warehouseTotals[warehouseName] || 0,
+  }));
 
   useEffect(() => {
     if (!showOrderModal || modalOrderType !== 'Transfer') return;
@@ -2263,7 +2324,14 @@ function App() {
         </div>
 
         <nav className="flex-1 p-4 space-y-2">
-          <button onClick={() => {setActiveTab('inventory'); setIsSidebarOpen(false)}} className={`w-full text-left p-3 rounded-lg text-base font-bold transition-all ${activeTab === 'inventory' ? 'bg-[#F2C4CE]/10 text-[#F2C4CE] border border-[#F2C4CE]/20' : 'text-gray-400 hover:bg-white/5'}`}>{['Supplier', 'Accountant'].includes(user.role) ? 'DASHBOARD' : 'INVENTORY'}</button>
+          {['SuperAdmin', 'Manager'].includes(user.role) ? (
+            <>
+              <button onClick={() => {setActiveTab('dashboard'); setIsSidebarOpen(false)}} className={`w-full text-left p-3 rounded-lg text-base font-bold transition-all ${activeTab === 'dashboard' ? `${user.role === 'SuperAdmin' ? 'bg-[#F58F7C]/10 text-[#F7AA9A] border border-[#F58F7C]/20' : 'bg-[#F2C4CE]/10 text-[#F2C4CE] border border-[#F2C4CE]/20'}` : 'text-gray-400 hover:bg-white/5'}`}>DASHBOARD</button>
+              <button onClick={() => {setActiveTab('inventory'); setIsSidebarOpen(false)}} className={`w-full text-left p-3 rounded-lg text-base font-bold transition-all ${activeTab === 'inventory' ? 'bg-[#F2C4CE]/10 text-[#F2C4CE] border border-[#F2C4CE]/20' : 'text-gray-400 hover:bg-white/5'}`}>INVENTORY</button>
+            </>
+          ) : (
+            <button onClick={() => {setActiveTab('inventory'); setIsSidebarOpen(false)}} className={`w-full text-left p-3 rounded-lg text-base font-bold transition-all ${activeTab === 'inventory' ? 'bg-[#F2C4CE]/10 text-[#F2C4CE] border border-[#F2C4CE]/20' : 'text-gray-400 hover:bg-white/5'}`}>{['Supplier', 'Accountant'].includes(user.role) ? 'DASHBOARD' : 'INVENTORY'}</button>
+          )}
           {user.role === 'Supplier' && (
             <button onClick={() => {setActiveTab('supplierProducts'); setIsSidebarOpen(false)}} className={`w-full text-left p-3 rounded-lg text-base font-bold transition-all ${activeTab === 'supplierProducts' ? 'bg-[#F2C4CE]/10 text-[#F2C4CE] border border-[#F2C4CE]/20' : 'text-gray-400 hover:bg-white/5'}`}>PRODUCTS</button>
           )}
@@ -2396,50 +2464,186 @@ function App() {
         <div className="p-8">
           {activeTab === 'inventory' && user.role === 'Supplier' && (
             <div className="space-y-8">
-              <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-                <div className="rounded-2xl border border-[#5A595E] bg-[#36353A]/40 p-6 shadow-2xl">
-                  <div className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#F2C4CE]">Supplier Dashboard</div>
-                  <div className="mt-3 text-2xl font-bold text-white">{supplierProfile?.name || user.supplierName || user.name}</div>
-                  <div className="mt-2 text-[13px] text-gray-400">{supplierProfile?.email || user.email}</div>
-                  <div className="mt-1 text-[13px] text-gray-500">{supplierProfile?.contactPerson || 'Supplier contact account'}</div>
+              <div className="rounded-3xl border border-[#5A595E] bg-[#36353A]/40 p-6 shadow-2xl">
+                <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.4fr,0.9fr] xl:items-start">
+                  <div>
+                    <div className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#F2C4CE]">Supplier Dashboard</div>
+                    <div className="mt-3 text-[34px] font-bold leading-tight text-white">{supplierProfile?.name || user.supplierName || user.name}</div>
+                    <p className="mt-3 max-w-3xl text-[14px] leading-7 text-gray-400">
+                      Operational view of your current Lumiere purchase orders, signature workload, and payout setup.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 xl:grid-cols-1">
+                    <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-3">
+                      <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-500">Contact</div>
+                      <div className="mt-2 truncate font-bold text-white">{supplierProfile?.contactPerson || user.name}</div>
+                    </div>
+                    <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-3">
+                      <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-500">Email</div>
+                      <div className="mt-2 truncate text-[13px] text-gray-300">{supplierProfile?.email || user.email}</div>
+                    </div>
+                    <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-3">
+                      <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-500">Address</div>
+                      <div className="mt-2 line-clamp-2 text-[13px] leading-6 text-gray-300">{supplierProfile?.address || 'No address provided.'}</div>
+                    </div>
+                  </div>
                 </div>
-                <div className="rounded-2xl border border-[#5A595E] bg-[#36353A]/40 p-6 shadow-2xl">
-                  <div className="text-[13px] font-bold uppercase tracking-[0.12em] text-gray-500">Pending Orders</div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+                <div className="rounded-2xl border border-[#5A595E] bg-[#36353A]/40 p-5 shadow-2xl">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-gray-500">Pending Orders</div>
                   <div className="mt-3 text-3xl font-bold text-white">{supplierPendingOrders}</div>
-                  <div className="mt-2 text-[13px] text-gray-400">Orders currently awaiting completion.</div>
+                  <div className="mt-2 text-[13px] text-gray-400">Active purchase orders in progress.</div>
                 </div>
-                <div className="rounded-2xl border border-[#5A595E] bg-[#36353A]/40 p-6 shadow-2xl">
-                  <div className="text-[13px] font-bold uppercase tracking-[0.12em] text-gray-500">Awaiting Signature</div>
+                <div className="rounded-2xl border border-[#5A595E] bg-[#36353A]/40 p-5 shadow-2xl">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-gray-500">Awaiting Signature</div>
                   <div className="mt-3 text-3xl font-bold text-[#F7C0B4]">{supplierAwaitingSignatureOrders}</div>
-                  <div className="mt-2 text-[13px] text-gray-400">Purchase orders waiting on supplier confirmation.</div>
+                  <div className="mt-2 text-[13px] text-gray-400">Documents waiting for supplier action.</div>
+                </div>
+                <div className="rounded-2xl border border-[#5A595E] bg-[#36353A]/40 p-5 shadow-2xl">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-gray-500">Completed</div>
+                  <div className="mt-3 text-3xl font-bold text-[#92E2A1]">{supplierCompletedOrders}</div>
+                  <div className="mt-2 text-[13px] text-gray-400">Orders fully delivered and closed.</div>
+                </div>
+                <div className="rounded-2xl border border-[#5A595E] bg-[#36353A]/40 p-5 shadow-2xl">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-gray-500">Primary Payout</div>
+                  <div className="mt-3 text-2xl font-bold text-white">{supplierPrimaryPaymentLabel}</div>
+                  <div className="mt-2 text-[13px] text-gray-400">{supplierPrimaryPaymentMethod ? 'Ready for disbursement' : 'Setup required'}</div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                <div className="rounded-2xl border border-[#5A595E] bg-[#36353A]/40 p-6 shadow-2xl">
-                  <div className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#F2C4CE]">Order Summary</div>
-                  <div className="mt-5 space-y-3 text-[14px]">
-                    <div className="flex items-center justify-between rounded-xl border border-white/8 bg-black/10 px-4 py-3">
-                      <span className="text-gray-500 uppercase font-bold">Completed</span>
-                      <span className="font-bold text-[#78DC8C]">{supplierCompletedOrders}</span>
+              <div className="grid grid-cols-1 gap-6 xl:grid-cols-[0.95fr,1.05fr]">
+                <div className="rounded-3xl border border-[#5A595E] bg-[#36353A]/40 p-6 shadow-2xl">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#F2C4CE]">Order Pipeline</div>
+                      <p className="mt-2 text-[14px] text-gray-400">Current supplier activity across fulfillment stages.</p>
                     </div>
-                    <div className="flex items-center justify-between rounded-xl border border-white/8 bg-black/10 px-4 py-3">
-                      <span className="text-gray-500 uppercase font-bold">Payment Methods</span>
-                      <span className="font-bold text-white">{supplierProfile?.paymentMethods?.length || 0}</span>
+                    <LayoutDashboard size={18} className="text-gray-500" />
+                  </div>
+                  <div className="mt-8 flex min-h-[240px] items-end justify-between gap-4">
+                    {supplierPipelineStats.map((item) => (
+                      <div key={item.label} className="flex flex-1 flex-col items-center gap-3">
+                        <div className="flex h-[170px] w-full items-end justify-center rounded-2xl border border-white/6 bg-black/10 px-3 py-4">
+                          <div
+                            className={`w-full max-w-[72px] rounded-2xl ${item.tone} shadow-[0_12px_30px_rgba(0,0,0,0.18)]`}
+                            style={{ height: `${Math.max((item.value / supplierPipelineMax) * 140, item.value > 0 ? 18 : 8)}px` }}
+                          />
+                        </div>
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-white">{item.value}</div>
+                          <div className="mt-1 text-[11px] font-bold uppercase tracking-[0.14em] text-gray-500">{item.label}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-[#5A595E] bg-[#36353A]/40 p-6 shadow-2xl">
+                  <div className="flex flex-col gap-2 border-b border-white/8 pb-4 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <div className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#F2C4CE]">Recent Orders</div>
+                      <p className="mt-2 text-[14px] text-gray-400">Latest purchase requests and document checkpoints.</p>
+                    </div>
+                    <button onClick={() => setActiveTab('orders')} className="rounded-xl border border-white/10 bg-black/10 px-4 py-2 text-[12px] font-bold uppercase tracking-[0.14em] text-gray-300 transition hover:border-[#F2C4CE]/20 hover:bg-white/5 hover:text-white">
+                      Open Orders
+                    </button>
+                  </div>
+                  <div className="mt-5 overflow-hidden rounded-2xl border border-white/8 bg-black/10">
+                    {supplierRecentOrders.length > 0 ? (
+                      <div className="divide-y divide-white/6">
+                        {supplierRecentOrders.map((order) => (
+                          <div key={order._id} className="grid grid-cols-1 gap-3 px-5 py-4 lg:grid-cols-[minmax(0,1.35fr),110px,minmax(190px,0.95fr)] lg:items-center">
+                            <div className="min-w-0">
+                              <div className="truncate font-bold text-white">{order.product?.name || 'Unassigned Product'}</div>
+                              <div className="mt-1 text-[13px] text-gray-400">
+                                {order.quantity} {order.product?.unitOfMeasure || 'unit'} • {order.warehouse?.name || order.sourceWarehouse?.name || 'Warehouse pending'}
+                              </div>
+                            </div>
+                            <div className="text-[13px] text-gray-400">{new Date(order.createdAt).toLocaleDateString()}</div>
+                            <div className="text-left lg:text-right">
+                              <span className={`inline-flex max-w-full rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] ${getSupplierDashboardOrderStatusClass(order)}`}>
+                                <span className="truncate">{getSupplierDashboardOrderStatusLabel(order)}</span>
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="px-5 py-8 text-center text-[14px] text-gray-500">
+                        No purchase orders have been assigned to this supplier account yet.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-6 xl:grid-cols-[0.9fr,1.1fr]">
+                <div className="rounded-3xl border border-[#5A595E] bg-[#36353A]/40 p-6 shadow-2xl">
+                  <div className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#F2C4CE]">Account Summary</div>
+                  <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3">
+                    <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-4 md:col-span-2">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-500">Primary payout method</div>
+                          <div className="mt-2 truncate font-bold text-white">{supplierPrimaryPaymentLabel}</div>
+                        </div>
+                        <div className={`shrink-0 text-[13px] font-bold ${supplierPrimaryPaymentMethod ? 'text-[#92E2A1]' : 'text-[#F7C0B4]'}`}>
+                          {supplierPrimaryPaymentMethod ? 'Ready' : 'Needs setup'}
+                        </div>
+                      </div>
+                      <div className="mt-3 truncate text-[13px] text-gray-400">{supplierPrimaryPaymentDetail}</div>
+                    </div>
+                    <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-4">
+                      <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-500">Saved methods</div>
+                      <div className="mt-2 text-2xl font-bold text-white">{supplierSavedPaymentMethods}</div>
+                      <div className="mt-2 text-[12px] text-gray-500">
+                        {supplierExtraPaymentMethods > 0 ? `+${supplierExtraPaymentMethods} more saved` : 'Single method on file'}
+                      </div>
                     </div>
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-[#5A595E] bg-[#36353A]/40 p-6 shadow-2xl">
-                  <div className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#F2C4CE]">Company Reference</div>
-                  <div className="mt-5 space-y-3 text-[14px] text-gray-300">
-                    <div><span className="text-gray-500 uppercase font-bold">Company</span><div className="mt-1 font-bold text-white">Lumiere Corporation</div></div>
-                    <div><span className="text-gray-500 uppercase font-bold">Supplier Email</span><div className="mt-1">{supplierProfile?.email || user.email}</div></div>
-                    <div><span className="text-gray-500 uppercase font-bold">Address</span><div className="mt-1">{supplierProfile?.address || 'No address provided.'}</div></div>
+                <div className="rounded-3xl border border-[#5A595E] bg-[#36353A]/40 p-6 shadow-2xl">
+                  <div className="flex flex-col gap-2 border-b border-white/8 pb-4 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <div className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#F2C4CE]">Action List</div>
+                      <p className="mt-2 text-[14px] text-gray-400">Recommended next steps for this supplier workspace.</p>
+                    </div>
+                  </div>
+                  <div className="mt-5 space-y-3">
+                    <button onClick={() => setActiveTab('orders')} className="flex w-full items-center justify-between rounded-2xl border border-white/8 bg-black/10 px-4 py-4 text-left transition hover:border-[#F2C4CE]/20 hover:bg-white/5">
+                      <div>
+                        <div className="font-bold text-white">Review pending orders</div>
+                        <div className="mt-1 text-[13px] text-gray-400">Open the supplier order queue and check current inbound requests.</div>
+                      </div>
+                      <div className="text-[12px] font-bold uppercase tracking-[0.14em] text-[#F2C4CE]">{supplierPendingOrders}</div>
+                    </button>
+                    <button onClick={() => setActiveTab('orders')} className="flex w-full items-center justify-between rounded-2xl border border-white/8 bg-black/10 px-4 py-4 text-left transition hover:border-[#F2C4CE]/20 hover:bg-white/5">
+                      <div>
+                        <div className="font-bold text-white">Resolve signature requests</div>
+                        <div className="mt-1 text-[13px] text-gray-400">Purchase orders waiting on supplier signature need attention.</div>
+                      </div>
+                      <div className="text-[12px] font-bold uppercase tracking-[0.14em] text-[#F7C0B4]">{supplierAwaitingSignatureOrders}</div>
+                    </button>
+                    <button onClick={() => setActiveTab('paymentMethods')} className="flex w-full items-center justify-between rounded-2xl border border-white/8 bg-black/10 px-4 py-4 text-left transition hover:border-[#F2C4CE]/20 hover:bg-white/5">
+                      <div>
+                        <div className="font-bold text-white">Update payout settings</div>
+                        <div className="mt-1 text-[13px] text-gray-400">Keep your disbursement method current for smoother accounting release.</div>
+                      </div>
+                      <div className="text-[12px] font-bold uppercase tracking-[0.14em] text-gray-300">{supplierSavedPaymentMethods} saved</div>
+                    </button>
+                    <button onClick={() => setActiveTab('supplierProducts')} className="flex w-full items-center justify-between rounded-2xl border border-white/8 bg-black/10 px-4 py-4 text-left transition hover:border-[#F2C4CE]/20 hover:bg-white/5">
+                      <div>
+                        <div className="font-bold text-white">Review product catalog</div>
+                        <div className="mt-1 text-[13px] text-gray-400">Check the products currently linked to your supplier account.</div>
+                      </div>
+                      <div className="text-[12px] font-bold uppercase tracking-[0.14em] text-gray-300">Catalog</div>
+                    </button>
                   </div>
                 </div>
               </div>
-
             </div>
           )}
 
@@ -2680,6 +2884,277 @@ function App() {
                   </div>
                 );
               })()}
+            </div>
+          )}
+
+          {activeTab === 'dashboard' && user.role === 'Manager' && (
+            <div className="space-y-8">
+              <div className="rounded-3xl border border-[#5A595E] bg-[#36353A]/40 p-6 shadow-2xl">
+                <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.25fr,0.95fr] xl:items-start">
+                  <div>
+                    <div className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#F2C4CE]">Manager Dashboard</div>
+                    <div className="mt-3 text-[34px] font-bold leading-tight text-white">{user.name}</div>
+                    <p className="mt-3 max-w-3xl text-[14px] leading-7 text-gray-400">
+                      Warehouse operations overview for assigned locations, active orders, stock pressure, and required approvals.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-4">
+                      <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-500">Assigned Warehouses</div>
+                      <div className="mt-2 text-lg font-bold text-white">{assignedWarehouseLabel || 'Unassigned'}</div>
+                    </div>
+                    <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-4">
+                      <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-500">Inventory Value</div>
+                      <div className="mt-2 text-2xl font-bold text-[#92E2A1]">{formatCurrency(totalValue)}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
+                <div className="rounded-2xl border border-[#5A595E] bg-[#36353A]/40 p-5 shadow-2xl">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-gray-500">Pending Inbound</div>
+                  <div className="mt-3 text-3xl font-bold text-white">{managerPendingInbound}</div>
+                  <div className="mt-2 text-[13px] text-gray-400">Supplier restocks that still need action.</div>
+                </div>
+                <div className="rounded-2xl border border-[#5A595E] bg-[#36353A]/40 p-5 shadow-2xl">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-gray-500">Pending Transfers</div>
+                  <div className="mt-3 text-3xl font-bold text-white">{managerPendingTransfers}</div>
+                  <div className="mt-2 text-[13px] text-gray-400">Warehouse-to-warehouse movements in progress.</div>
+                </div>
+                <div className="rounded-2xl border border-[#5A595E] bg-[#36353A]/40 p-5 shadow-2xl">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-gray-500">Completed</div>
+                  <div className="mt-3 text-3xl font-bold text-[#92E2A1]">{managerCompletedOrders}</div>
+                  <div className="mt-2 text-[13px] text-gray-400">Orders already closed in your scope.</div>
+                </div>
+                <div className="rounded-2xl border border-[#5A595E] bg-[#36353A]/40 p-5 shadow-2xl">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-gray-500">Critical Alerts</div>
+                  <div className="mt-3 text-3xl font-bold text-[#F7C0B4]">{lowStockCount}</div>
+                  <div className="mt-2 text-[13px] text-gray-400">Low-stock products needing warehouse attention.</div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-6 xl:grid-cols-[0.92fr,1.08fr]">
+                <div className="rounded-3xl border border-[#5A595E] bg-[#36353A]/40 p-6 shadow-2xl">
+                  <div className="flex flex-col gap-2 border-b border-white/8 pb-4 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <div className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#F2C4CE]">Warehouse Load</div>
+                      <p className="mt-2 text-[14px] text-gray-400">Current stock volume across your assigned locations.</p>
+                    </div>
+                  </div>
+                  <div className="mt-5 space-y-3">
+                    {managerWarehouseLoad.length > 0 ? managerWarehouseLoad.map((warehouse) => (
+                      <div key={warehouse.name} className="rounded-2xl border border-white/8 bg-black/10 px-4 py-4">
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="min-w-0">
+                            <div className="truncate font-bold text-white">{warehouse.name}</div>
+                            <div className="mt-1 text-[12px] uppercase tracking-[0.14em] text-gray-500">Warehouse stock units</div>
+                          </div>
+                          <div className="text-2xl font-bold text-white">{warehouse.stock}</div>
+                        </div>
+                      </div>
+                    )) : (
+                      <div className="rounded-2xl border border-dashed border-white/10 bg-black/10 px-5 py-8 text-center text-[14px] text-gray-500">
+                        No warehouse assignment found for this manager.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-[#5A595E] bg-[#36353A]/40 p-6 shadow-2xl">
+                  <div className="flex flex-col gap-2 border-b border-white/8 pb-4 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <div className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#F2C4CE]">Recent Activity</div>
+                      <p className="mt-2 text-[14px] text-gray-400">Latest order and transfer activity within your operational scope.</p>
+                    </div>
+                    <button onClick={() => setActiveTab('orders')} className="rounded-xl border border-white/10 bg-black/10 px-4 py-2 text-[12px] font-bold uppercase tracking-[0.14em] text-gray-300 transition hover:border-[#F2C4CE]/20 hover:bg-white/5 hover:text-white">
+                      Open Logs
+                    </button>
+                  </div>
+                  <div className="mt-5 overflow-hidden rounded-2xl border border-white/8 bg-black/10">
+                    {managerRecentActivity.length > 0 ? (
+                      <div className="divide-y divide-white/6">
+                        {managerRecentActivity.map((order) => (
+                          <div key={order._id} className="grid grid-cols-1 gap-3 px-5 py-4 lg:grid-cols-[minmax(0,1.2fr),120px,minmax(170px,0.9fr)] lg:items-center">
+                            <div className="min-w-0">
+                              <div className="truncate font-bold text-white">{order.product?.name || 'Unassigned Product'}</div>
+                              <div className="mt-1 text-[13px] text-gray-400">
+                                {order.orderType} • {order.warehouse || order.sourceWarehouse || 'Warehouse pending'}
+                              </div>
+                            </div>
+                            <div className="text-[13px] text-gray-400">{new Date(order.createdAt).toLocaleDateString()}</div>
+                            <div className="text-left lg:text-right">
+                              <span className={`inline-flex max-w-full rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] ${
+                                getStatusLabel(order) === 'Cancelled'
+                                  ? 'border-red-400/30 bg-red-400/10 text-red-300'
+                                  : ['Delivered', 'Completed', 'Order Received', 'Transfer Completed'].includes(getStatusLabel(order))
+                                    ? 'border-[#78DC8C]/30 bg-[#78DC8C]/10 text-[#92E2A1]'
+                                    : getStatusLabel(order) === 'Awaiting Supplier Signature'
+                                      ? 'border-[#F5A28F]/30 bg-[#F58F7C]/10 text-[#F7C0B4]'
+                                      : 'border-white/10 bg-white/5 text-gray-300'
+                              }`}>
+                                <span className="truncate">{getStatusLabel(order)}</span>
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="px-5 py-8 text-center text-[14px] text-gray-500">
+                        No recent activity is available for your assigned warehouses.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'dashboard' && user.role === 'SuperAdmin' && (
+            <div className="space-y-8">
+              <div className="rounded-3xl border border-[#5A595E] bg-[#36353A]/40 p-6 shadow-2xl">
+                <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.25fr,0.95fr] xl:items-start">
+                  <div>
+                    <div className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#F58F7C]">SuperAdmin Dashboard</div>
+                    <div className="mt-3 text-[34px] font-bold leading-tight text-white">Lumiere Command Overview</div>
+                    <p className="mt-3 max-w-3xl text-[14px] leading-7 text-gray-400">
+                      Executive view of inventory health, live order pressure, accounting exposure, and the supplier network.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-4">
+                      <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-500">Inventory Value</div>
+                      <div className="mt-2 text-2xl font-bold text-[#92E2A1]">{formatCurrency(totalValue)}</div>
+                    </div>
+                    <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-4">
+                      <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-500">Critical Alerts</div>
+                      <div className="mt-2 text-2xl font-bold text-[#F7C0B4]">{lowStockCount}</div>
+                    </div>
+                    <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-4">
+                      <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-500">Suppliers</div>
+                      <div className="mt-2 text-2xl font-bold text-white">{suppliers.length}</div>
+                    </div>
+                    <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-4">
+                      <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-500">Personnel</div>
+                      <div className="mt-2 text-2xl font-bold text-white">{users.length}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
+                <div className="rounded-2xl border border-[#5A595E] bg-[#36353A]/40 p-5 shadow-2xl">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-gray-500">Pending Inbound</div>
+                  <div className="mt-3 text-3xl font-bold text-white">{superAdminInboundPending}</div>
+                  <div className="mt-2 text-[13px] text-gray-400">Supplier orders still moving through approval or delivery.</div>
+                </div>
+                <div className="rounded-2xl border border-[#5A595E] bg-[#36353A]/40 p-5 shadow-2xl">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-gray-500">Pending Transfers</div>
+                  <div className="mt-3 text-3xl font-bold text-white">{superAdminTransferPending}</div>
+                  <div className="mt-2 text-[13px] text-gray-400">Warehouse requests waiting on signatures or receiving.</div>
+                </div>
+                <div className="rounded-2xl border border-[#5A595E] bg-[#36353A]/40 p-5 shadow-2xl">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-gray-500">Accounts Payable</div>
+                  <div className="mt-3 text-3xl font-bold text-[#F7C0B4]">{formatCurrency(accountsPayableTotal)}</div>
+                  <div className="mt-2 text-[13px] text-gray-400">Supplier liabilities still awaiting disbursement.</div>
+                </div>
+                <div className="rounded-2xl border border-[#5A595E] bg-[#36353A]/40 p-5 shadow-2xl">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-gray-500">Accounts Receivable</div>
+                  <div className="mt-3 text-3xl font-bold text-[#92E2A1]">{formatCurrency(accountsReceivableTotal)}</div>
+                  <div className="mt-2 text-[13px] text-gray-400">Customer sales still pending collection.</div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.05fr,0.95fr]">
+                <div className="rounded-3xl border border-[#5A595E] bg-[#36353A]/40 p-6 shadow-2xl">
+                  <div className="flex flex-col gap-2 border-b border-white/8 pb-4 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <div className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#F58F7C]">Operations Snapshot</div>
+                      <p className="mt-2 text-[14px] text-gray-400">Latest requests and fulfillment checkpoints across the network.</p>
+                    </div>
+                    <button onClick={() => setActiveTab('orders')} className="rounded-xl border border-white/10 bg-black/10 px-4 py-2 text-[12px] font-bold uppercase tracking-[0.14em] text-gray-300 transition hover:border-[#F2C4CE]/20 hover:bg-white/5 hover:text-white">
+                      Open Logs
+                    </button>
+                  </div>
+                  <div className="mt-5 overflow-hidden rounded-2xl border border-white/8 bg-black/10">
+                    {superAdminRecentActivity.length > 0 ? (
+                      <div className="divide-y divide-white/6">
+                        {superAdminRecentActivity.map((order) => (
+                          <div key={order._id} className="grid grid-cols-1 gap-3 px-5 py-4 lg:grid-cols-[minmax(0,1.2fr),120px,minmax(170px,0.9fr)] lg:items-center">
+                            <div className="min-w-0">
+                              <div className="truncate font-bold text-white">{order.product?.name || 'Unassigned Product'}</div>
+                              <div className="mt-1 text-[13px] text-gray-400">
+                                {order.orderType} • {order.warehouse || order.sourceWarehouse || 'Warehouse pending'}
+                              </div>
+                            </div>
+                            <div className="text-[13px] text-gray-400">{new Date(order.createdAt).toLocaleDateString()}</div>
+                            <div className="text-left lg:text-right">
+                              <span className={`inline-flex max-w-full rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] ${
+                                getStatusLabel(order) === 'Cancelled'
+                                  ? 'border-red-400/30 bg-red-400/10 text-red-300'
+                                  : ['Delivered', 'Completed', 'Order Received', 'Transfer Completed'].includes(getStatusLabel(order))
+                                    ? 'border-[#78DC8C]/30 bg-[#78DC8C]/10 text-[#92E2A1]'
+                                    : getStatusLabel(order) === 'Awaiting Supplier Signature'
+                                      ? 'border-[#F5A28F]/30 bg-[#F58F7C]/10 text-[#F7C0B4]'
+                                      : 'border-white/10 bg-white/5 text-gray-300'
+                              }`}>
+                                <span className="truncate">{getStatusLabel(order)}</span>
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="px-5 py-8 text-center text-[14px] text-gray-500">
+                        No recent operational activity is available yet.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-6">
+                  <div className="rounded-3xl border border-[#5A595E] bg-[#36353A]/40 p-6 shadow-2xl">
+                    <div className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#F58F7C]">Cashflow Summary</div>
+                    <div className="mt-5 grid grid-cols-2 gap-4">
+                      <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-4">
+                        <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-500">Disbursed</div>
+                        <div className="mt-2 text-2xl font-bold text-white">{formatCurrency(disbursementTotal)}</div>
+                      </div>
+                      <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-4">
+                        <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-500">Collected</div>
+                        <div className="mt-2 text-2xl font-bold text-white">{formatCurrency(collectionsTotal)}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-3xl border border-[#5A595E] bg-[#36353A]/40 p-6 shadow-2xl">
+                    <div className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#F58F7C]">Executive Actions</div>
+                    <div className="mt-5 space-y-3">
+                      <button onClick={() => { setActiveTab('expenses'); setExpenseSubTab('payables'); }} className="flex w-full items-center justify-between rounded-2xl border border-white/8 bg-black/10 px-4 py-4 text-left transition hover:border-[#F2C4CE]/20 hover:bg-white/5">
+                        <div>
+                          <div className="font-bold text-white">Review payables</div>
+                          <div className="mt-1 text-[13px] text-gray-400">Check supplier disbursements and accounting settlement status.</div>
+                        </div>
+                        <div className="text-[12px] font-bold uppercase tracking-[0.14em] text-[#F7C0B4]">Finance</div>
+                      </button>
+                      <button onClick={() => { setActiveTab('suppliers'); setSupplierSubTab('network'); }} className="flex w-full items-center justify-between rounded-2xl border border-white/8 bg-black/10 px-4 py-4 text-left transition hover:border-[#F2C4CE]/20 hover:bg-white/5">
+                        <div>
+                          <div className="font-bold text-white">Manage supplier hub</div>
+                          <div className="mt-1 text-[13px] text-gray-400">Open supplier accounts, payout data, and warehouse assignments.</div>
+                        </div>
+                        <div className="text-[12px] font-bold uppercase tracking-[0.14em] text-gray-300">{suppliers.length}</div>
+                      </button>
+                      <button onClick={() => setActiveTab('users')} className="flex w-full items-center justify-between rounded-2xl border border-white/8 bg-black/10 px-4 py-4 text-left transition hover:border-[#F2C4CE]/20 hover:bg-white/5">
+                        <div>
+                          <div className="font-bold text-white">Open personnel</div>
+                          <div className="mt-1 text-[13px] text-gray-400">Review managers, accountants, and staff access across the system.</div>
+                        </div>
+                        <div className="text-[12px] font-bold uppercase tracking-[0.14em] text-gray-300">{users.length}</div>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
