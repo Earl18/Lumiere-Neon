@@ -44,7 +44,8 @@ Core areas of the website:
 ### 3. Customer Sales
 - Managers or the Super Admin create outbound orders from warehouse stock
 - Stock is validated before the sale is created
-- The sale can generate a packing list from the order details flow
+- Pending sales can download a packing list from the order details modal
+- Once `Deliver` is confirmed, the sale auto-prints a receipt and switches the document action to downloadable order receipt
 - Only completed sales can be collected in the receivables ledger
 
 ### 4. Accounting and Settlement
@@ -89,7 +90,8 @@ Core areas of the website:
 ### Documents
 - Purchase order generation
 - Transfer order generation
-- Packing list generation for outbound customer sales
+- Packing list generation for pending outbound customer sales
+- Printable and downloadable order receipts for delivered customer sales
 - Packing list generation for signed stock transfers
 - Re-downloadable generated documents after template updates
 

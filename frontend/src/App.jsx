@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { fetchProducts, fetchOrders, fetchSuppliers, createOrder, createProduct, importProducts, downloadProductImportTemplate, updateOrderStatus, downloadOrderPackingList, updateOrderAccounting, createSupplier, updateSupplier, updateProduct, deleteProduct, deleteSupplier, fetchWarehouses, createWarehouse, updateWarehouse, deleteWarehouse, fetchPurchaseOrderForOrder, signPurchaseOrder, fetchTransferOrderForOrder, signTransferOrder, downloadTransferPackingList, createOrUpdateSupplierAccount, fetchOwnSupplierProfile, updateOwnSupplierPaymentMethods } from './api/inventory';
+import { fetchProducts, fetchOrders, fetchSuppliers, createOrder, createProduct, importProducts, downloadProductImportTemplate, updateOrderStatus, updateOrderAccounting, createSupplier, updateSupplier, updateProduct, deleteProduct, deleteSupplier, fetchWarehouses, createWarehouse, updateWarehouse, deleteWarehouse, fetchPurchaseOrderForOrder, signPurchaseOrder, fetchTransferOrderForOrder, signTransferOrder, downloadTransferPackingList, downloadOrderPackingList, createOrUpdateSupplierAccount, fetchOwnSupplierProfile, updateOwnSupplierPaymentMethods } from './api/inventory';
 import Login from './components/Login';
 import SignaturePadField from './components/SignaturePadField';
 import SupplierSignPage from './components/SupplierSignPage';
@@ -10,6 +10,10 @@ import { Menu, X, Download, ShieldCheck, Users, Package, Truck, LayoutDashboard,
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
 const API_ORIGIN = API_BASE.replace(/\/api$/, '');
+const COMPANY_RECEIPT_NAME = 'Lumiere Corporation';
+const COMPANY_RECEIPT_ADDRESS = 'Natalio B. Bacalso Ave, Bulacao Pardo, Cebu City, 6000 Cebu';
+const COMPANY_RECEIPT_CONTACT = '09705157399';
+const formatCurrencyValue = (value) => `₱${Number(value || 0).toLocaleString()}`;
 const getActiveTabStorageKey = (userId) => `lumiere_active_tab_${userId}`;
 const getSupplierSubTabStorageKey = (userId) => `lumiere_supplier_subtab_${userId}`;
 const getExpenseSubTabStorageKey = (userId) => `lumiere_expense_subtab_${userId}`;
@@ -261,6 +265,77 @@ const getOrderReceivableAmount = (order) => {
 
   return getOrderCustomerUnitPrice(order) * Number(order.quantity || 0);
 };
+const getOrderReceiptNumber = (order) => String(order?.receiptNumber || `RCT-${String(order?._id || '').slice(-6).toUpperCase() || 'PENDING'}`).trim();
+const getOrderCustomerName = (order) => String(order?.customerName || '').trim() || 'Walk-in Customer';
+const getOrderCustomerPaymentMethod = (order) => String(order?.customerPaymentMethod || '').trim() || 'Cash';
+const getOrderDiscountAmount = (order) => Math.max(0, Number(order?.discountAmount || 0));
+const getOrderTaxAmount = (order) => Math.max(0, Number(order?.taxAmount || 0));
+const getOrderReceiptSubtotal = (order) => getOrderCustomerUnitPrice(order) * Number(order?.quantity || 0);
+const getOrderReceiptTotal = (order) => Math.max(0, getOrderReceiptSubtotal(order) - getOrderDiscountAmount(order) + getOrderTaxAmount(order));
+const getOrderReceiptText = (order) => {
+  const description = order?.product?.name || 'Customer Sale';
+  const quantity = Number(order?.quantity || 0);
+  const unitPrice = getOrderCustomerUnitPrice(order);
+  const amount = getOrderReceiptSubtotal(order);
+  const subtotal = amount;
+  const total = getOrderReceiptTotal(order);
+  const quantityLabel = `${quantity} ${order?.product?.unitOfMeasure || 'unit'}`;
+
+  return [
+    '--------------------------------------------------',
+    '                    RECEIPT',
+    '--------------------------------------------------',
+    '',
+    COMPANY_RECEIPT_NAME,
+    COMPANY_RECEIPT_ADDRESS,
+    `Contact Number: ${COMPANY_RECEIPT_CONTACT}`,
+    '',
+    '--------------------------------------------------',
+    '',
+    `Receipt No.: ${getOrderReceiptNumber(order)}`,
+    `Date: ${new Date(order?.updatedAt || order?.createdAt || Date.now()).toLocaleString()}`,
+    '',
+    '--------------------------------------------------',
+    'ITEMS PURCHASED',
+    '--------------------------------------------------',
+    '',
+    `${description} | ${quantityLabel} | ${formatCurrencyValue(unitPrice)}`,
+    '',
+    '--------------------------------------------------',
+    '',
+    `Subtotal:      ${formatCurrencyValue(subtotal)}`,
+    '---------------------------------',
+    `TOTAL:         ${formatCurrencyValue(total)}`,
+    '',
+    '--------------------------------------------------',
+    'Thank you for your purchase!',
+    '--------------------------------------------------',
+  ].join('\n');
+};
+const getOrderReceiptHtml = (order) => {
+  const escapeHtml = (value) => String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+  return `<!doctype html>
+  <html>
+    <head>
+      <meta charset="utf-8" />
+      <title>${escapeHtml(getOrderReceiptNumber(order))}</title>
+      <style>
+        body { font-family: "Courier New", monospace; padding: 24px; color: #111; }
+        .receipt { max-width: 720px; margin: 0 auto; white-space: pre-wrap; line-height: 1.6; font-size: 14px; }
+        @media print { body { padding: 0; } .receipt { max-width: none; } }
+      </style>
+    </head>
+    <body>
+      <div class="receipt">${escapeHtml(getOrderReceiptText(order))}</div>
+    </body>
+  </html>`;
+};
 const getOrderAccountingPaymentMethodSummary = (order) => {
   const fallbackMethod = getPrimarySupplierPaymentMethod(order?.supplier);
   const methodName = String(order?.accountingPaymentMethodName || fallbackMethod?.methodName || '').trim();
@@ -313,7 +388,7 @@ function App() {
     quantity: 0,
     warehouse: '',
     sourceWarehouse: '',
-    orderType: 'Inbound'
+    orderType: 'Inbound',
   };
 
   const [user, setUser] = useState(JSON.parse(localStorage.getItem('lumiere_user')));
@@ -434,6 +509,7 @@ function App() {
   const [accountingActionTarget, setAccountingActionTarget] = useState(null);
   const [selectedAccountingPaymentMethod, setSelectedAccountingPaymentMethod] = useState('');
   const [selectedOutboundOrder, setSelectedOutboundOrder] = useState(null);
+  const [shouldAutoPrintOutboundReceipt, setShouldAutoPrintOutboundReceipt] = useState(false);
   const canManageOrders = ['Manager', 'SuperAdmin'].includes(user?.role);
   const canManageProducts = ['Manager', 'SuperAdmin'].includes(user?.role);
   const canViewExpenses = ['SuperAdmin', 'Accountant'].includes(user?.role);
@@ -1059,17 +1135,47 @@ function App() {
 
   const handleDeliver = async (id, type) => {
     try {
-      await updateOrderStatus(id, 'Delivered');
-      triggerSuccess(type === 'Inbound' ? 'Order received successfully.' : `System Update: ${type} transfer confirmed.`);
+      const updatedOrder = await updateOrderStatus(id, 'Delivered');
+      if (type === 'Outbound') {
+        const currentOrder = orders.find((order) => order._id === id);
+        const resolvedOutboundOrder = {
+          ...currentOrder,
+          ...updatedOrder,
+          product: updatedOrder?.product && typeof updatedOrder.product === 'object' ? updatedOrder.product : currentOrder?.product,
+        };
+        setSelectedOutboundOrder(resolvedOutboundOrder);
+        setShouldAutoPrintOutboundReceipt(true);
+        triggerSuccess('Customer sale completed. Receipt ready for print.');
+      } else {
+        triggerSuccess(type === 'Inbound' ? 'Order received successfully.' : `System Update: ${type} transfer confirmed.`);
+      }
       loadData(); 
     } catch (error) {
       triggerError(error.message);
     }
   };
 
-  const handleDownloadPackingList = async (id) => {
+  const handleDownloadOrderReceipt = (order) => {
     try {
-      const { blob, fileName } = await downloadOrderPackingList(id);
+      const receiptHtml = getOrderReceiptHtml(order);
+      const blob = new Blob([receiptHtml], { type: 'text/html;charset=utf-8' });
+      const blobUrl = window.URL.createObjectURL(blob);
+      const downloadLink = document.createElement('a');
+      downloadLink.href = blobUrl;
+      downloadLink.download = `${getOrderReceiptNumber(order).toLowerCase()}.html`;
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      document.body.removeChild(downloadLink);
+      window.URL.revokeObjectURL(blobUrl);
+      triggerSuccess('Order receipt downloaded.');
+    } catch (error) {
+      triggerError(error.message);
+    }
+  };
+
+  const handleDownloadOutboundPackingList = async (orderId) => {
+    try {
+      const { blob, fileName } = await downloadOrderPackingList(orderId);
       const blobUrl = window.URL.createObjectURL(blob);
       const downloadLink = document.createElement('a');
       downloadLink.href = blobUrl;
@@ -1107,6 +1213,44 @@ function App() {
 
   const closeOutboundOrderModal = () => {
     setSelectedOutboundOrder(null);
+    setShouldAutoPrintOutboundReceipt(false);
+  };
+
+  const handlePrintOrderReceipt = (order) => {
+    const printFrame = document.createElement('iframe');
+    printFrame.style.position = 'fixed';
+    printFrame.style.right = '0';
+    printFrame.style.bottom = '0';
+    printFrame.style.width = '0';
+    printFrame.style.height = '0';
+    printFrame.style.border = '0';
+    printFrame.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(printFrame);
+
+    const frameWindow = printFrame.contentWindow;
+    if (!frameWindow) {
+      document.body.removeChild(printFrame);
+      triggerError('Unable to prepare the receipt print preview.');
+      return;
+    }
+
+    frameWindow.document.open();
+    frameWindow.document.write(getOrderReceiptHtml(order));
+    frameWindow.document.close();
+    frameWindow.focus();
+
+    const cleanupPrintFrame = () => {
+      window.setTimeout(() => {
+        if (document.body.contains(printFrame)) {
+          document.body.removeChild(printFrame);
+        }
+      }, 500);
+    };
+
+    printFrame.onload = () => {
+      frameWindow.print();
+      cleanupPrintFrame();
+    };
   };
 
   const handleAccountingAction = async (orderId, action, options = {}) => {
@@ -2250,6 +2394,12 @@ function App() {
     transferSourceWarehouseOptions,
     newOrder.sourceWarehouse,
   ]);
+
+  useEffect(() => {
+    if (!selectedOutboundOrder || !shouldAutoPrintOutboundReceipt || selectedOutboundOrder.status !== 'Delivered') return;
+    handlePrintOrderReceipt(selectedOutboundOrder);
+    setShouldAutoPrintOutboundReceipt(false);
+  }, [selectedOutboundOrder, shouldAutoPrintOutboundReceipt]);
 
   const canEditUser = (targetUser) => {
     if (targetUser.role === 'Supplier') return false;
@@ -3423,7 +3573,7 @@ function App() {
                       const actor = getOrderActor(o);
                       const isPurchaseOrderOpenable = canOpenPurchaseOrder(o);
                       const isTransferOrderOpenable = canOpenTransferOrder(o);
-                      const isOutboundOrderOpenable = o.orderType === 'Outbound' && o.status !== 'Delivered';
+                      const isOutboundOrderOpenable = o.orderType === 'Outbound';
                       const isOrderDocumentOpenable = isPurchaseOrderOpenable || isTransferOrderOpenable || isOutboundOrderOpenable;
                       return (
                       <tr
@@ -4100,6 +4250,13 @@ function App() {
                 <div className="mt-1 text-[12px] text-gray-400">Per {selectedOutboundOrder.product?.unitOfMeasure || 'unit'}</div>
               </div>
               <div className="rounded-2xl border border-white/8 bg-black/10 p-4">
+                <div className="text-[12px] uppercase tracking-[0.12em] text-gray-500">Quantity</div>
+                <div className="mt-2 text-lg font-bold text-white">
+                  {selectedOutboundOrder.quantity} {selectedOutboundOrder.product?.unitOfMeasure || 'unit'}
+                </div>
+                <div className="mt-1 text-[12px] text-gray-400">Customer order volume</div>
+              </div>
+              <div className="rounded-2xl border border-white/8 bg-black/10 p-4 md:col-span-2">
                 <div className="text-[12px] uppercase tracking-[0.12em] text-gray-500">Receivable Amount</div>
                 <div className="mt-2 text-lg font-bold text-[#78DC8C]">{formatCurrency(getOrderReceivableAmount(selectedOutboundOrder))}</div>
                 <div className="mt-1 text-[12px] text-gray-400">Customer sale record</div>
@@ -4107,18 +4264,30 @@ function App() {
             </div>
 
             <div className="mt-5 rounded-2xl border border-white/8 bg-black/10 p-5">
-              <div className="text-[12px] uppercase tracking-[0.12em] text-gray-500">Packing List</div>
+              <div className="text-[12px] uppercase tracking-[0.12em] text-gray-500">Document Actions</div>
               <p className="mt-2 text-[14px] leading-7 text-gray-300">
-                Download or re-download the current packing list for this customer sale at any time.
+                {selectedOutboundOrder.status === 'Delivered'
+                  ? 'This sale has been completed. Download the official order receipt anytime.'
+                  : 'This sale is still pending. Only the packing list is available until delivery is confirmed.'}
               </p>
               <div className="mt-4 flex flex-wrap gap-3">
-                <button
-                  type="button"
-                  onClick={() => handleDownloadPackingList(selectedOutboundOrder._id)}
-                  className="rounded-lg border border-[#F2C4CE]/40 bg-[#F2C4CE]/10 px-5 py-3 text-[13px] font-bold uppercase tracking-[0.12em] text-[#F2C4CE] transition hover:bg-[#F2C4CE]/20 hover:text-white"
-                >
-                  Download Packing List
-                </button>
+                {selectedOutboundOrder.status === 'Delivered' ? (
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadOrderReceipt(selectedOutboundOrder)}
+                    className="rounded-lg border border-[#F2C4CE]/40 bg-[#F2C4CE]/10 px-5 py-3 text-[13px] font-bold uppercase tracking-[0.12em] text-[#F2C4CE] transition hover:bg-[#F2C4CE]/20 hover:text-white"
+                  >
+                    Download Order Receipt
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadOutboundPackingList(selectedOutboundOrder._id)}
+                    className="rounded-lg border border-[#78DC8C]/35 bg-[#78DC8C]/10 px-5 py-3 text-[13px] font-bold uppercase tracking-[0.12em] text-[#92E2A1] transition hover:bg-[#78DC8C]/20 hover:text-white"
+                  >
+                    Download Packing List
+                  </button>
+                )}
               </div>
             </div>
           </div>

@@ -50,6 +50,12 @@ const getPrimarySupplierPaymentMethod = (supplier) => {
     if (!methods.length) return null;
     return methods.find((method) => method?.isPrimary) || methods[0];
 };
+
+const generateReceiptNumber = () => {
+    const year = new Date().getFullYear();
+    const suffix = `${Date.now()}`.slice(-6);
+    return `RCT-${year}-${suffix}`;
+};
 const resolveCheckoutPaymentMethodFromSupplier = (supplier, requestedMethod) => {
     const primaryMethod = getPrimarySupplierPaymentMethod(supplier);
     const providerCode = String(primaryMethod?.providerCode || '').trim().toUpperCase();
@@ -722,6 +728,12 @@ const createOrder = async (req, res) => {
 
         let supplierUnitPrice = 0;
         let customerUnitPrice = 0;
+        let customerName = '';
+        let customerPaymentMethod = 'Cash';
+        let discountAmount = 0;
+        let taxAmount = 0;
+        let receiptNumber = '';
+        let receivableAmount = 0;
 
         if (payload.orderType === 'Inbound') {
             if (payload.warehouse !== WAREHOUSE_A_NAME) {
@@ -762,6 +774,12 @@ const createOrder = async (req, res) => {
             }
 
             customerUnitPrice = Number(product.price || 0);
+            customerName = String(payload.customerName || '').trim() || 'Walk-in Customer';
+            customerPaymentMethod = String(payload.customerPaymentMethod || '').trim() || 'Cash';
+            discountAmount = Math.max(0, Number(payload.discountAmount || 0));
+            taxAmount = Math.max(0, Number(payload.taxAmount || 0));
+            receiptNumber = String(payload.receiptNumber || '').trim() || generateReceiptNumber();
+            receivableAmount = Math.max(0, (customerUnitPrice * quantity) - discountAmount + taxAmount);
         }
 
         if (payload.orderType === 'Transfer') {
@@ -807,7 +825,12 @@ const createOrder = async (req, res) => {
             supplierUnitPrice,
             expenseAmount: payload.orderType === 'Inbound' ? supplierUnitPrice * quantity : 0,
             customerUnitPrice,
-            receivableAmount: payload.orderType === 'Outbound' ? customerUnitPrice * quantity : 0,
+            receivableAmount,
+            customerName,
+            customerPaymentMethod,
+            discountAmount,
+            taxAmount,
+            receiptNumber,
             createdBy: req.user?._id,
             createdByName: req.user?.name || 'Unknown User',
             createdByRole: req.user?.role || 'Unknown',
